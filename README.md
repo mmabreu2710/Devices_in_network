@@ -9,13 +9,13 @@ To get started, make sure you have the following installed:
 2. **Python Packages**  
    Install the required Python packages by running the following commands in your terminal:
 
-   """
+   ```
    pip install netifaces
    pip install scapy prettytable
    pip install scapy prettytable netifaces python-nmap smbprotocol zeroconf
    pip install scapy prettytable netifaces python-nmap zeroconf miniupnpc
    pip install scapy prettytable netifaces python-nmap zeroconf upnpclient
-   """
+   ```
 
 ## Updating the Manufacturer File
 The `manuf.txt` file is used to identify manufacturers of network devices by their MAC addresses. To keep this file up-to-date with the latest manufacturer information:
@@ -26,9 +26,9 @@ The `manuf.txt` file is used to identify manufacturers of network devices by the
 ## Running the Project
 To run the project, execute the following command in your terminal:
 
-"""
+```
 python main.py
-"""
+```
 
 ## Device Information Displayed
 Each device on the network is identified and displayed with the following details:
