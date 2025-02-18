@@ -1,50 +1,187 @@
-# Devices in Network Project
+# **Network Scanner Web Application**
 
-## Prerequisites
-To get started, make sure you have the following installed:
+## **📌 Project Overview**
+This is a **web-based network scanner** built with **Flask** that detects devices on a network, retrieves their **IP addresses, MAC addresses, manufacturers, and hostnames**, and allows **detailed port scanning** of individual devices.
 
-1. **Microsoft Visual C++ Build Tools**  
-   Ensure that the *Desktop development with C++* workload is selected during installation.
-
-2. **Python Packages**  
-   Install the required Python packages by running the following commands in your terminal:
-
-   ```
-   pip install netifaces
-   pip install scapy prettytable
-   pip install scapy prettytable netifaces python-nmap smbprotocol zeroconf
-   pip install scapy prettytable netifaces python-nmap zeroconf miniupnpc
-   pip install scapy prettytable netifaces python-nmap zeroconf upnpclient
-   ```
-
-## Updating the Manufacturer File
-The `manuf.txt` file is used to identify manufacturers of network devices by their MAC addresses. To keep this file up-to-date with the latest manufacturer information:
-
-- Visit the [Wireshark OUI lookup page](https://www.wireshark.org/tools/oui-lookup.html) or similar websites.
-- Download the latest version and replace your `manuf.txt` file with the updated one.
-
-## Running the Project
-To run the project, execute the following command in your terminal:
-
-```
-python3 main.py
-```
-
-## Device Information Displayed
-Each device on the network is identified and displayed with the following details:
-
-- **Name**: Device name
-- **IP Address**: Device IP address
-- **MAC Address**: Device MAC address
-- **Manufacturer**: Device manufacturer, retrieved from `manuf.txt`
+### **🔹 Features**
+✅ **Scan the local network** to detect connected devices.  
+✅ **Retrieve device details** (MAC address, manufacturer, hostname).  
+✅ **Clickable rows** redirect to a new page for **port scanning**.  
+✅ **Perform deep port scans** on a selected device.  
+✅ **Display service details** for each open port (service name, version, extra info).  
+✅ **Runs entirely in a web browser** with a simple **Flask API backend**.
 
 ---
 
-This setup will help ensure that your network device project functions optimally, keeping your dependencies organized and up-to-date.
+## **🛠️ Installation**
+### **🔹 1. Clone the Repository**
+```bash
+git clone https://github.com/yourusername/network-scanner.git
+cd network-scanner
+```
 
-To run this use this commands:
-source venv/bin/activate
-pip install flask flask-cors
-pip install python-nmap
+### **🔹 2. Set Up a Virtual Environment**
+```bash
+python3 -m venv venv
+source venv/bin/activate  # On macOS/Linux
+venv\Scripts\activate    # On Windows
+```
+
+### **🔹 3. Install Dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+### **🔹 4. Install System Dependencies (Linux/macOS)**
+Ensure that `nmap` is installed on your system:
+```bash
+sudo apt install nmap  # Debian/Ubuntu
+brew install nmap      # macOS
+```
+
+---
+
+## **🚀 Running the Application**
+### **🔹 Start the Flask Web App**
+```bash
 sudo venv/bin/python3 app.py
+```
+
+Open **http://127.0.0.1:5000** in your browser.
+
+### **🔹 How It Works**
+1. Click **"Scan Network"** to discover devices.
+2. Click on a device row to scan its open ports.
+3. View **detailed service information** for each open port.
+
+---
+
+## **🖥️ File Structure**
+```bash
+network-scanner/
+│── app.py          # Flask API backend
+│── main.py         # Network scanning logic (device discovery)
+│── port_scanner.py # Port scanning logic
+│── templates/
+│   ├── index.html       # Main UI (network scan results)
+│   ├── port_scan.html   # Detailed port scan results
+│── static/
+│── requirements.txt     # Python dependencies
+│── README.md            # Project documentation
+```
+
+---
+
+## **🌐 API Endpoints**
+### **🔹 Network Scan**
+```
+GET /scan
+```
+- Scans the local network and returns a list of detected devices.
+
+### **🔹 Port Scan for a Specific IP**
+```
+GET /api/scan/<ip>
+```
+- Scans the specified IP for open ports and returns detailed service information.
+
+---
+
+## **💡 Example Usage**
+### **🔹 Network Scan Response**
+```json
+[
+    {
+        "id": "1",
+        "name": "TL-WPA4220.Home",
+        "mac": "00:31:92:5e:01:36",
+        "ip": "192.168.1.112",
+        "manufacturer": "TPLink"
+    },
+    {
+        "id": "2",
+        "name": "meo.Home",
+        "mac": "00:06:91:3d:a0:6f",
+        "ip": "192.168.1.254",
+        "manufacturer": "PTInovacao"
+    }
+]
+```
+
+### **🔹 Port Scan Response**
+```json
+{
+    "ip": "192.168.1.112",
+    "open_ports": [
+        {
+            "port": 22,
+            "state": "open",
+            "service": "ssh",
+            "product": "OpenSSH",
+            "version": "8.2p1",
+            "extra_info": "Ubuntu"
+        },
+        {
+            "port": 80,
+            "state": "open",
+            "service": "http",
+            "product": "Apache",
+            "version": "2.4.41",
+            "extra_info": ""
+        }
+    ]
+}
+```
+
+---
+
+## **🛠️ Troubleshooting**
+### **🔹 No Open Ports Found?**
+1. Run **Nmap manually** to confirm ports are open:
+   ```bash
+   sudo nmap -p 1-65535 --open -sV 192.168.1.112
+   ```
+2. Try using **`-Pn`** (some devices block ping requests):
+   ```bash
+   sudo nmap -p 1-65535 -sV -Pn 192.168.1.112
+   ```
+3. Check if the **device has running services** (SSH, web, etc.).
+4. Disable **firewalls** temporarily:
+   ```bash
+   sudo ufw disable  # Linux (UFW firewall)
+   netsh advfirewall set allprofiles state off  # Windows
+   ```
+
+### **🔹 `ModuleNotFoundError: No module named 'nmap'`**
+Run:
+```bash
+source venv/bin/activate  # Activate virtual environment
+pip install python-nmap
+```
+If using `sudo`, install inside `venv`:
+```bash
+sudo venv/bin/python3 -m pip install python-nmap
+```
+
+### **🔹 `nmap` Not Installed?**
+Check if `nmap` is installed:
+```bash
+which nmap
+```
+If missing, install:
+```bash
+sudo apt install nmap  # Debian/Ubuntu
+brew install nmap      # macOS
+```
+
+
+## **💡 Future Improvements**
+- 📊 **Graphical visualization** of scanned results.
+- 🌎 **Remote scanning** (scan external networks via VPN/Tunnel).
+- 📌 **More detailed device fingerprinting** using passive techniques.
+- 🔐 **Authentication system** to restrict access.
+
+---
+
+🚀 **Now you're ready to scan your network like a pro!** 🔥
 
