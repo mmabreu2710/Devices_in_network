@@ -9,17 +9,13 @@ import upnpclient
 import dns.resolver
 import os
 from manuf import manuf
+import platform
+import json
+import ipaddress
 
 # Load the manuf parser with the specified file
 manuf_file_path = os.path.join(os.getcwd(), 'manuf.txt')
 p = manuf.MacParser(manuf_file_path)
-
-# Debugging: Check a few example MAC addresses
-example_macs = ["44:cb:8b:61:cc:8e", "00:31:92:5e:01:36", "68:3e:26:73:e1:c8"]
-print("Example MAC address lookups:")
-for mac in example_macs:
-    manufacturer = p.get_manuf(mac)
-    print(f"{mac}: {manufacturer}")
 
 class MyListener(ServiceListener):
     def __init__(self):
@@ -36,172 +32,116 @@ class MyListener(ServiceListener):
                 "ip": socket.inet_ntoa(info.addresses[0])
             })
 
+
 def get_network_range():
-    # Get the default gateway
+    """Retrieve network CIDR based on default gateway."""
     gateways = netifaces.gateways()
     default_gateway = gateways['default'][netifaces.AF_INET][0]
-    
-    # Get the network interface for the default gateway
     iface = gateways['default'][netifaces.AF_INET][1]
     
-    # Get the IP address and subnet mask
     addr_info = netifaces.ifaddresses(iface)[netifaces.AF_INET][0]
-    ip_address = addr_info['addr']
-    subnet_mask = addr_info['netmask']
+    network = ipaddress.IPv4Network(f"{addr_info['addr']}/{addr_info['netmask']}", strict=False)
     
-    # Calculate the network address
-    ip_parts = list(map(int, ip_address.split('.')))
-    mask_parts = list(map(int, subnet_mask.split('.')))
-    network_parts = [ip & mask for ip, mask in zip(ip_parts, mask_parts)]
-    network_address = ".".join(map(str, network_parts))
-    
-    # Calculate the network range
-    network_range = f"{network_address}/{sum(bin(mask).count('1') for mask in mask_parts)}"
-    
-    return network_range
+    return str(network)
+
 
 def get_devices_on_network(ip_range):
-    # Create ARP request packet
+    """Send ARP requests to find active devices on the network."""
     arp = ARP(pdst=ip_range)
     ether = Ether(dst="ff:ff:ff:ff:ff:ff")
     packet = ether / arp
 
-    # Send the packet and get the response
     result = srp(packet, timeout=5, verbose=0, retry=2)[0]
 
     devices = []
-    for sent, received in result:
+    for _, received in result:
         mac = received.hwsrc
         manufacturer = p.get_manuf(mac) or "Unknown"
-        name = get_device_name(received.psrc, manufacturer)
-        if name == "Unknown":
-            name = retry_get_device_name(received.psrc)
-        if name == "Unknown" and manufacturer == "Unknown":
-            print(f"Unknown device found: IP {received.psrc}, MAC {mac}")
-        device = {
+        name = get_device_name(received.psrc, manufacturer) or retry_get_device_name(received.psrc)
+
+        devices.append({
             "ip": received.psrc,
             "mac": mac,
-            "name": name,
+            "name": name if name != "Unknown" else None,
             "manufacturer": manufacturer
-        }
-        devices.append(device)
+        })
 
     return devices
 
 def get_device_name(ip, manufacturer):
-    # Try to get the hostname using socket
-    try:
-        hostname = socket.gethostbyaddr(ip)[0]
-        print(f"Socket hostname for {ip}: {hostname}")
-        return hostname
-    except socket.herror:
-        pass
+    """Retrieve device hostname using multiple methods."""
+    methods = [
+        lambda: socket.gethostbyaddr(ip)[0],
+        lambda: nmap_lookup(ip),
+        lambda: ping_lookup(ip),
+        lambda: netbios_lookup(ip),
+        lambda: dns_ptr_lookup(ip)
+    ]
 
-    # Try to get the hostname using nmap
-    try:
-        nm = nmap.PortScanner()
-        nm.scan(ip, arguments='-sP')
-        if ip in nm.all_hosts():
-            hostname = nm[ip].hostname()
-            print(f"Nmap hostname for {ip}: {hostname}")
-            return hostname
-    except Exception as e:
-        print(f"Error using nmap for IP {ip}: {e}")
-
-    # Try to get the hostname using ping
-    try:
-        result = subprocess.check_output(["ping", "-a", "-n", "1", ip], universal_newlines=True)
-        for line in result.split('\n'):
-            if "Pinging" in line and "[" in line:
-                start = line.find("[") + 1
-                end = line.find("]")
-                hostname = line[start:end]
-                print(f"Ping hostname for {ip}: {hostname}")
-                return hostname
-    except subprocess.CalledProcessError:
-        pass
-
-    # Try to get the hostname using nbtstat
-    try:
-        result = subprocess.check_output(["nbtstat", "-A", ip], universal_newlines=True)
-        for line in result.split('\n'):
-            if "<20>" in line and "UNIQUE" in line:
-                hostname = line.split()[0].strip()
-                print(f"NBTSTAT hostname for {ip}: {hostname}")
-                return hostname
-    except subprocess.CalledProcessError as e:
-        print(f"Error using nbtstat for IP {ip}: {e}")
-
-    # Try to get the hostname using DNS PTR lookup
-    try:
-        resolver = dns.resolver.Resolver()
-        resolver.nameservers = [netifaces.gateways()['default'][netifaces.AF_INET][0]]
-        reversed_ip = '.'.join(reversed(ip.split('.'))) + '.in-addr.arpa'
-        answers = resolver.resolve(reversed_ip, 'PTR')
-        for rdata in answers:
-            hostname = str(rdata)
-            print(f"DNS PTR hostname for {ip}: {hostname}")
-            if hostname.startswith("android-") or hostname.startswith("iphone-"):
-                return hostname
-    except Exception as e:
-        print(f"Error using DNS PTR for IP {ip}: {e}")
-    
-    # Heuristic based on manufacturer
-    if "apple" in manufacturer.lower():
-        return "iPhone"
-    elif "samsung" in manufacturer.lower() or "huawei" in manufacturer.lower() or "xiaomi" in manufacturer.lower() or "google" in manufacturer.lower():
-        return "Android"
-
-    return "Unknown"
-
-def retry_get_device_name(ip):
-    # Retry all methods for name resolution
-    name = get_device_name(ip, "")
-    if name == "Unknown":
+    for method in methods:
         try:
-            result = subprocess.check_output(["ping", "-a", "-n", "3", ip], universal_newlines=True)
-            for line in result.split('\n'):
-                if "Pinging" in line and "[" in line:
-                    start = line.find("[") + 1
-                    end = line.find("]")
-                    hostname = line[start:end]
-                    print(f"Ping retry hostname for {ip}: {hostname}")
-                    return hostname
-        except subprocess.CalledProcessError:
-            pass
-
-        try:
-            result = subprocess.check_output(["nbtstat", "-A", ip], universal_newlines=True)
-            for line in result.split('\n'):
-                if "<20>" in line and "UNIQUE" in line:
-                    hostname = line.split()[0].strip()
-                    print(f"NBTSTAT retry hostname for {ip}: {hostname}")
-                    return hostname
-        except subprocess.CalledProcessError as e:
-            print(f"Error using nbtstat for IP {ip}: {e}")
-
-        try:
-            resolver = dns.resolver.Resolver()
-            resolver.nameservers = [netifaces.gateways()['default'][netifaces.AF_INET][0]]
-            reversed_ip = '.'.join(reversed(ip.split('.'))) + '.in-addr.arpa'
-            answers = resolver.resolve(reversed_ip, 'PTR')
-            for rdata in answers:
-                hostname = str(rdata)
-                print(f"DNS PTR retry hostname for {ip}: {hostname}")
+            hostname = method()
+            if hostname and hostname != "Unknown":
                 return hostname
         except Exception as e:
-            print(f"Error using DNS PTR for IP {ip}: {e}")
+            continue  # Silent fail, move to the next method
 
-    return name
+    return heuristic_lookup(manufacturer)
+
+def nmap_lookup(ip):
+    nm = nmap.PortScanner()
+    nm.scan(ip, arguments='-sP')
+    return nm[ip].hostname() if ip in nm.all_hosts() else None
+
+def ping_lookup(ip):
+    cmd = ["ping", "-a", "-n", "1", ip] if platform.system().lower() == "windows" else ["ping", "-c", "1", "-W", "1", ip]
+    result = subprocess.run(cmd, capture_output=True, text=True).stdout
+    if "[" in result:
+        return result.split("[")[1].split("]")[0]
+    elif "(" in result:
+        return result.split("(")[1].split(")")[0]
+    return None
+
+def netbios_lookup(ip):
+    if platform.system().lower() == "windows":
+        result = subprocess.run(["nbtstat", "-A", ip], capture_output=True, text=True).stdout
+        for line in result.split("\n"):
+            if "<20>" in line and "UNIQUE" in line:
+                return line.split()[0].strip()
+    else:
+        result = subprocess.run(["avahi-resolve", "-a", ip], capture_output=True, text=True).stdout
+        return result.split("\t")[-1].strip() if result else None
+
+def dns_ptr_lookup(ip):
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = [netifaces.gateways()['default'][netifaces.AF_INET][0]]
+    reversed_ip = ".".join(reversed(ip.split("."))) + ".in-addr.arpa"
+    answers = resolver.resolve(reversed_ip, "PTR")
+    return str(answers[0]) if answers else None
+
+def heuristic_lookup(manufacturer):
+    """Guess device type based on manufacturer."""
+    lower_manufacturer = manufacturer.lower()
+    if "apple" in lower_manufacturer:
+        return "iPhone"
+    if any(x in lower_manufacturer for x in ["samsung", "huawei", "xiaomi", "google"]):
+        return "Android"
+    return "Unknown"
+
+
 
 def get_mdns_devices():
+    """Discover devices using mDNS."""
     zeroconf = Zeroconf()
     listener = MyListener()
-    ServiceBrowser(zeroconf, "_services._dns-sd._udp.local.", listener)
-    ServiceBrowser(zeroconf, "_http._tcp.local.", listener)
-    ServiceBrowser(zeroconf, "_device-info._tcp.local.", listener)
+    services = ["_services._dns-sd._udp.local.", "_http._tcp.local.", "_device-info._tcp.local."]
+
+    for service in services:
+        ServiceBrowser(zeroconf, service, listener)
+
     zeroconf.close()
     return listener.devices
+
 
 def get_upnp_devices():
     result = []
@@ -217,11 +157,10 @@ def get_upnp_devices():
     return result
 
 def print_devices(devices, mdns_devices, upnp_devices):
-    table = PrettyTable()
-    table.field_names = ["ID", "Name", "MAC Address", "IP Address", "Manufacturer"]
-
     mdns_map = {device["ip"]: device["name"] for device in mdns_devices}
     upnp_map = {device["ip"]: device["name"] for device in upnp_devices}
+
+    device_list = []
     
     for idx, device in enumerate(devices, start=1):
         name = device["name"]
@@ -230,16 +169,26 @@ def print_devices(devices, mdns_devices, upnp_devices):
                 name = mdns_map[device["ip"]]
             elif device["ip"] in upnp_map:
                 name = upnp_map[device["ip"]]
-        manufacturer = device.get("manufacturer", "Unknown")
-        table.add_row([idx, name, device["mac"], device["ip"], manufacturer])
 
-    print(table)
+        manufacturer = device.get("manufacturer", "Unknown")
+        
+        # Store structured data instead of printing a table
+        device_list.append({
+            "id": str(idx),
+            "name": name,
+            "mac": device["mac"],
+            "ip": device["ip"],
+            "manufacturer": manufacturer
+        })
+
+    # Print JSON instead of a table (so Flask can read it)
+    print(json.dumps(device_list))
+
 
 if __name__ == "__main__":
     # Automatically determine the network range
     network_range = get_network_range()
 
-    print(f"Scanning the network {network_range}...")
     devices = get_devices_on_network(network_range)
     mdns_devices = get_mdns_devices()
     upnp_devices = get_upnp_devices()

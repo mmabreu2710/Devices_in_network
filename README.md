@@ -27,7 +27,7 @@ The `manuf.txt` file is used to identify manufacturers of network devices by the
 To run the project, execute the following command in your terminal:
 
 ```
-python main.py
+python3 main.py
 ```
 
 ## Device Information Displayed
@@ -41,3 +41,10 @@ Each device on the network is identified and displayed with the following detail
 ---
 
 This setup will help ensure that your network device project functions optimally, keeping your dependencies organized and up-to-date.
+
+To run this use this commands:
+source venv/bin/activate
+pip install flask flask-cors
+pip install python-nmap
+sudo venv/bin/python3 app.py
+
